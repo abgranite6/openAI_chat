@@ -1,6 +1,8 @@
-public class ConversationHistory
+namespace OpenAiChat.Models;
+
+public class Conversation
 {
-    public string ConversationId { get; set; }
+    public string ConversationId { get; set; } = string.Empty;
     public List<Message> Messages { get; set; } = new();
-    public string Summary { get; set; }
+    public string Summary { get; set; } = string.Empty;
 }
