@@ -94,7 +94,7 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
         _settings = new OpenAiSettings
         {
             ApiKey = configuration["OpenAI:ApiKey"] ?? throw new InvalidOperationException("OpenAI API key not configured"),
-            Model = configuration["OpenAI:Model"] ?? "gpt-3.5-turbo",
+            Model = configuration["OpenAI:Model"] ?? "gpt-4o",
             Temperature = double.TryParse(configuration["OpenAI:Temperature"], out var temp) ? temp : 0.25,
             MaxTokens = int.TryParse(configuration["OpenAI:MaxTokens"], out var tokens) ? tokens : 1500,
             MaxRetryAttempts = int.TryParse(configuration["OpenAI:MaxRetryAttempts"], out var retries) ? retries : 2

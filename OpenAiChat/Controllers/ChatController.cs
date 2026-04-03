@@ -9,11 +9,42 @@ namespace OpenAiChat.Controllers;
 public class ChatController : ControllerBase
 {
     private readonly IOpenAiService _openAiService;
-    private readonly IRedisService _redisService;
 
-    public ChatController(IOpenAiService openAiService, IRedisService redisService)
+    public ChatController(IOpenAiService openAiService)
     {
         _openAiService = openAiService;
-        _redisService = redisService;
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<ChatResponse>> Post([FromBody] ChatRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ConversationId))
+        {
+            return BadRequest(new { error = "ConversationId is required" });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.UserInput))
+        {
+            return BadRequest(new { error = "UserInput is required" });
+        }
+
+        // Call OpenAI service - it handles everything:
+        // - Auto-fetches summary from Redis
+        // - Calls OpenAI API
+        // - Saves messages
+        // - Updates summary
+        // - Tracks tokens
+        var response = await _openAiService.GetResponseAsync(
+            request.ConversationId,
+            request.UserInput,
+            summary: null,  // Auto-fetch from Redis for follow-up support
+            knowledgeBase: null
+        );
+
+        // Return only the answer - do NOT expose summary to frontend
+        return Ok(new ChatResponse
+        {
+            Answer = response.Answer
+        });
     }
 }
