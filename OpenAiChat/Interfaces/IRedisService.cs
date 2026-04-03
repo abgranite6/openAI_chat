@@ -8,4 +8,6 @@ public interface IRedisService
     Task AppendMessageAsync(string conversationId, Message message);
     Task<string?> GetSummaryAsync(string conversationId);
     Task SetSummaryAsync(string conversationId, string summary);
+    Task<int> GetTotalTokensUsedAsync(string conversationId);
+    Task AddTokenUsageAsync(string conversationId, int tokensUsed);
 }

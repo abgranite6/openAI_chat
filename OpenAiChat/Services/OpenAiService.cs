@@ -82,11 +82,13 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
     private readonly ChatClient _chatClient;
     private readonly OpenAiSettings _settings;
     private readonly ILogger<OpenAiService> _logger;
+    private readonly IRedisService _redisService;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public OpenAiService(IConfiguration configuration, ILogger<OpenAiService> logger)
+    public OpenAiService(IConfiguration configuration, ILogger<OpenAiService> logger, IRedisService redisService)
     {
         _logger = logger;
+        _redisService = redisService;
 
         // Load settings from configuration
         _settings = new OpenAiSettings
@@ -123,6 +125,12 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
             };
         }
 
+        // Step 1: Get summary from Redis (override parameter if not provided)
+        if (string.IsNullOrWhiteSpace(summary))
+        {
+            summary = await _redisService.GetSummaryAsync(conversationId);
+        }
+
         int retryCount = 0;
         Exception? lastException = null;
 
@@ -133,7 +141,35 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
                 _logger.LogInformation("Processing request for conversation: {ConversationId}, Attempt: {Attempt}",
                     conversationId, retryCount + 1);
 
-                var response = await CallOpenAiApiAsync(userInput, summary, knowledgeBase);
+                // Step 2: Call OpenAI API (returns answer + summary + token usage)
+                var (response, tokenUsage) = await CallOpenAiApiAsync(userInput, summary, knowledgeBase);
+
+                // Step 3: Save user message
+                await _redisService.AppendMessageAsync(conversationId, new Message
+                {
+                    Content = userInput
+                });
+
+                // Step 4: Save AI response
+                await _redisService.AppendMessageAsync(conversationId, new Message
+                {
+                    Content = response.Answer
+                });
+
+                // Step 5: Update summary only if new summary is not empty
+                if (!string.IsNullOrWhiteSpace(response.Summary))
+                {
+                    await _redisService.SetSummaryAsync(conversationId, response.Summary);
+                }
+
+                // Step 6: Add token usage to conversation total
+                await _redisService.AddTokenUsageAsync(conversationId, tokenUsage.TotalTokens);
+
+                // Get total tokens for this conversation
+                var totalConversationTokens = await _redisService.GetTotalTokensUsedAsync(conversationId);
+
+                // Append token info to answer
+                response.Answer = $"{response.Answer}\n\n[Tokens - Input: {tokenUsage.InputTokens}, Output: {tokenUsage.OutputTokens}, Total: {tokenUsage.TotalTokens}] [Conversation Total: {totalConversationTokens}]";
 
                 _logger.LogInformation("Successfully processed request for conversation: {ConversationId}", conversationId);
 
@@ -170,7 +206,7 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
         };
     }
 
-    private async Task<OpenAiResponse> CallOpenAiApiAsync(string userInput, string? summary, string? knowledgeBase)
+    private async Task<(OpenAiResponse response, TokenUsage tokenUsage)> CallOpenAiApiAsync(string userInput, string? summary, string? knowledgeBase)
     {
         // Build message list
         var messages = new List<ChatMessage>
@@ -210,9 +246,15 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
 
         // Extract token usage
         var usage = completion.Value.Usage;
-        var tokenInfo = $"[Tokens - Input: {usage.InputTokenCount}, Output: {usage.OutputTokenCount}, Total: {usage.TotalTokenCount}]";
+        var tokenUsage = new TokenUsage
+        {
+            InputTokens = usage.InputTokenCount,
+            OutputTokens = usage.OutputTokenCount,
+            TotalTokens = usage.TotalTokenCount
+        };
 
-        _logger.LogInformation("OpenAI API call completed. {TokenInfo}", tokenInfo);
+        _logger.LogInformation("OpenAI API call completed. [Tokens - Input: {Input}, Output: {Output}, Total: {Total}]", 
+            tokenUsage.InputTokens, tokenUsage.OutputTokens, tokenUsage.TotalTokens);
 
         // Get response content
         var responseContent = completion.Value.Content[0].Text;
@@ -220,10 +262,7 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
         // Parse JSON response with fallback strategies
         var parsedResponse = ParseJsonResponse(responseContent);
 
-        // Append token usage to the answer
-        parsedResponse.Answer = $"{parsedResponse.Answer}\n\n{tokenInfo}";
-
-        return parsedResponse;
+        return (parsedResponse, tokenUsage);
     }
 
     private OpenAiResponse ParseJsonResponse(string content)
