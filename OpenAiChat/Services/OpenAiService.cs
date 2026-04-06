@@ -114,20 +114,16 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
             _settings.Model, _settings.Temperature, _settings.MaxTokens);
     }
 
-    public async Task<OpenAiResponse> GetResponseAsync(string conversationId, string userInput, string? knowledgeBase = null)
+    public async Task<string> GetResponseAsync(string conversationId, string userInput, string? knowledgeBase = null)
     {
         if (string.IsNullOrWhiteSpace(userInput))
         {
-            return new OpenAiResponse
-            {
-                Answer = "Please provide a valid input.",
-                Summary = string.Empty
-            };
+            return "Please provide a valid input.";
         }
 
         // Step 1: Get Conversation from redis
-        Conversation conversation = await _redisService.GetConversation(conversationId)
-            ?? new Conversation { ConversationId = conversationId, Messages = [], Summary = "", TotalTokensUsed = 0 };
+        //Conversation conversation = await _redisService.GetConversation(conversationId)
+        //    ?? new Conversation { ConversationId = conversationId, Messages = [], Summary = "", TotalTokensUsed = 0 };
 
         int retryCount = 0;
         Exception? lastException = null;
@@ -148,29 +144,35 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
                     new TokenUsage { InputTokens = inputToken, OutputTokens = outputToken, TotalTokens = inputToken + outputToken }
                 );
 
-                var messageCount = conversation.Messages?.Count ?? 0;
+                await _redisService.SetConversationId(conversationId);
+                //var messageCount = conversation.Messages?.Count ?? 0;
+                var messageCount = await _redisService.GetMessageCountAsync(conversationId);
                 // Step 3: Save user message
                 ++messageCount;
-                conversation?.Messages?.Add(new Message { UserType = MessageUserType.User, Content = userInput, MessageOrder = messageCount });
+                //conversation?.Messages?.Add(new Message { UserType = MessageUserType.User, Content = userInput, MessageOrder = messageCount });
+                await _redisService.AddMessageAsync(conversationId, new Message { UserType = MessageUserType.User, Content = userInput, MessageOrder = messageCount });
 
                 // Step 4: Save AI response
                 ++messageCount;
-                conversation?.Messages?.Add(new Message { UserType = MessageUserType.Agent, Content = response.Answer, MessageOrder = messageCount });
+                //conversation?.Messages?.Add(new Message { UserType = MessageUserType.Agent, Content = response.Answer, MessageOrder = messageCount });
+                await _redisService.AddMessageAsync(conversationId, new Message { UserType = MessageUserType.Agent, Content = response.Answer, MessageOrder = messageCount });
 
                 // Step 5: Update summary only if new summary is not empty
                 if (!string.IsNullOrWhiteSpace(response.Summary))
                 {
-                    conversation?.Summary = response.Summary;
+                    //conversation?.Summary = response.Summary;
+                    await _redisService.UpdateSummaryAsync(conversationId, response.Summary);
                 }
 
                 // Step 6: Add token usage to conversation total
-                conversation?.TotalTokensUsed = (conversation?.TotalTokensUsed ?? 0) + tokenUsage.TotalTokens;
+                //conversation?.TotalTokensUsed = (conversation?.TotalTokensUsed ?? 0) + tokenUsage.TotalTokens;
+                await _redisService.UpdateTotalTokensUsedAsync(conversationId, tokenUsage.TotalTokens);
 
                 // Step 7: Set the new conversation to redis
-                await _redisService.SetConversation(conversation!);
+                //await _redisService.SetConversation(conversation!);
                 _logger.LogInformation("Successfully processed request for conversation: {ConversationId}", conversationId);
 
-                return response;
+                return response.Answer;
             }
             catch (JsonException jsonEx)
             {
@@ -196,11 +198,7 @@ REMEMBER: Output ONLY the JSON object. Nothing else.";
         _logger.LogError("All retry attempts exhausted for conversation: {ConversationId}. Last error: {Error}",
             conversationId, lastException?.Message);
 
-        return new OpenAiResponse
-        {
-            Answer = "I apologize, but I encountered an error processing your request. Please try again.",
-            Summary = conversation.Summary ?? string.Empty
-        };
+        return "I apologize, but I encountered an error processing your request. Please try again.";
     }
 
     private async Task<(OpenAiResponse response, TokenUsage tokenUsage)> CallOpenAiApiAsync(string userInput, string? summary, string? knowledgeBase)

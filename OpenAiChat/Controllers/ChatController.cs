@@ -43,7 +43,7 @@ public class ChatController : ControllerBase
         // Return only the answer - do NOT expose summary to frontend
         return Ok(new ChatResponse
         {
-            Answer = response.Answer
+            Answer = response
         });
     }
 }
