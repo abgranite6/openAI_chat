@@ -37,7 +37,6 @@ public class ChatController : ControllerBase
         var response = await _openAiService.GetResponseAsync(
             request.ConversationId,
             request.UserInput,
-            summary: null,  // Auto-fetch from Redis for follow-up support
             knowledgeBase: null
         );
 
